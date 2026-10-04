@@ -82,7 +82,12 @@ def test_run_producer_stops_when_queue_full_and_stop_set(sample_tree):
     t.start()
     tasks.get(timeout=5)  # let one batch through, then the queue fills again
     stop.set()
-    while t.is_alive():
-        tasks.get(timeout=5)
+    # Drain until the sentinel, not while the thread is alive: it can still be
+    # "alive" for an instant after putting its last item, and get() would then hang.
+    drained = []
+    while (item := tasks.get(timeout=5)) is not None:
+        drained.append(item)
     t.join(timeout=5)
+    assert not t.is_alive()
     assert stats.done
+    assert len(drained) < 5  # stopped early: not all 6 single-file batches were sent
