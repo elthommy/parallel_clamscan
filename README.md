@@ -11,6 +11,12 @@ On a 16-core machine, scanning `/usr/lib/python3.14` (32.5k files, 760 MB) took
 **54 s with `pclamscan`, against 195 s with `clamscan -r`** (about 3.6× faster). See
 [Performance & tuning](#performance--tuning).
 
+> Not affiliated with or endorsed by Cisco or the ClamAV project. ClamAV is a
+> registered trademark of Cisco Systems, Inc.
+>
+> The code in this project was written with [Claude](https://claude.com/claude-code)
+> (Anthropic's AI assistant) and reviewed and tested by the author.
+
 ---
 
 ## Table of contents
@@ -29,6 +35,9 @@ On a 16-core machine, scanning `/usr/lib/python3.14` (32.5k files, 760 MB) took
 - [Limitations & differences from clamscan](#limitations--differences-from-clamscan)
 - [Project layout](#project-layout)
 - [Development](#development)
+- [Related projects](#related-projects)
+- [Credits](#credits)
+- [License](#license)
 
 ---
 
@@ -43,7 +52,7 @@ On a 16-core machine, scanning `/usr/lib/python3.14` (32.5k files, 760 MB) took
 ## Installation
 
 ```bash
-git clone <this repo> && cd parallel_clamscan
+git clone https://github.com/elthommy/parallel_clamscan.git && cd parallel_clamscan
 uv sync                      # creates .venv, installs the package and dev tools
 uv run pclamscan --help
 ```
@@ -344,6 +353,36 @@ uv run pytest                            # full suite before calling it done
 - `tests/test_integration.py` runs the **real `clamscan`** against the standard,
   harmless [EICAR](https://www.eicar.org/download-anti-malware-testfile/) test
   string. It takes about 6 s for the DB load and is skipped if `clamscan` is not
-  installed.
+  installed. The string is split in two in the source and only put together at
+  runtime, so antivirus software should not flag the repository. While the test
+  runs, a real EICAR file briefly exists in a pytest temp directory, which an
+  on-access scanner may report.
 - Conventions: every function has a docstring, functions stay under 50 lines, and
   test functions start with `test_`.
+
+## Related projects
+
+Other tools tackle the same problem, and one of them may suit you better:
+
+- [MultiClam](https://github.com/spacebanana420/multiclam) is a shell script that
+  also runs several `clamscan` instances on batches of files.
+- [parallel-clamav](https://github.com/HansMoleman/parallel-clamav) is a wrapper
+  that adds multi-threading to clamscan scans.
+- [clamscanner](https://github.com/esoadamo/clamscanner) is a multi-threaded,
+  recursive wrapper around the `clamd` daemon.
+- `clamdscan --multiscan`, part of ClamAV itself, scans in parallel through `clamd`.
+  The signature database is loaded only once, but the daemon has to be running.
+
+## Credits
+
+- The code was written with [Claude](https://claude.com/claude-code), Anthropic's
+  AI assistant, and reviewed and tested by the author.
+- [ClamAV](https://www.clamav.net/) does the actual scanning. This project only
+  runs the `clamscan` program and does not include or link to any ClamAV code.
+
+Not affiliated with or endorsed by Cisco or the ClamAV project. ClamAV is a
+registered trademark of Cisco Systems, Inc.
+
+## License
+
+[MIT](LICENSE) © 2026 Thomas BARBIER

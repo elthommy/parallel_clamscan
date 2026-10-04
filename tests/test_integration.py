@@ -8,8 +8,9 @@ from parallel_clamscan.cli import main
 
 pytestmark = pytest.mark.skipif(shutil.which("clamscan") is None, reason="clamscan not installed")
 
-# The standard, harmless EICAR antivirus test string.
-EICAR = r"X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
+# The standard, harmless EICAR antivirus test string. It is split in two so that
+# antivirus software does not flag this source file; it is only assembled at runtime.
+EICAR = r"X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD" + r"-ANTIVIRUS-TEST-FILE!$H+H*"
 
 
 def test_real_clamscan_detects_eicar(tmp_path, capsys):
