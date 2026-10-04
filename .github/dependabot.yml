@@ -1,0 +1,22 @@
+version: 2
+
+# One combined PR per week (Python deps + GitHub Actions), Saturday 08:00 Paris time.
+# Dependabot also runs once right after this file is added or changed.
+multi-ecosystem-groups:
+  weekly:
+    schedule:
+      interval: "weekly"
+      day: "saturday"
+      time: "08:00"
+      timezone: "Europe/Paris"
+
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    patterns: ["*"]
+    multi-ecosystem-group: "weekly"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    patterns: ["*"]
+    multi-ecosystem-group: "weekly"
