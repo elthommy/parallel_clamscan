@@ -5,12 +5,37 @@ from __future__ import annotations
 import os
 import queue
 import threading
+import unicodedata
 from collections.abc import Callable, Iterable, Iterator
 
 from parallel_clamscan.models import Batch, ProducerStats, ScanError
 
 ErrorSink = Callable[[ScanError], None]
 _PUT_TIMEOUT_S = 0.2
+# clamscan reads --file-list with a 1024-byte fgets buffer: longer lines are split
+# into several entries, so a path must stay under 1023 bytes to be read whole.
+_MAX_LISTED_PATH_BYTES = 1022
+# Control characters and line/paragraph separators would break the one-path-per-line
+# --file-list and the one-result-per-line clamscan output.
+_UNLISTABLE_CATEGORIES = {"Cc", "Zl", "Zp"}
+
+
+def unlistable_reason(path: str) -> str | None:
+    """Return why ``path`` cannot be passed to clamscan via --file-list, else None."""
+    if any(unicodedata.category(ch) in _UNLISTABLE_CATEGORIES for ch in path):
+        return "File name contains a control character, not scanned"
+    if len(os.fsencode(path)) > _MAX_LISTED_PATH_BYTES:
+        return f"Path longer than {_MAX_LISTED_PATH_BYTES} bytes, not scanned"
+    return None
+
+
+def _listable(path: str, size: int, on_error: ErrorSink) -> tuple[str, int] | None:
+    """Return ``(path, size)`` if clamscan can be given ``path``, else report an error."""
+    reason = unlistable_reason(path)
+    if reason is not None:
+        on_error(ScanError(path, reason))
+        return None
+    return path, size
 
 
 def _scan_dir(directory: str, on_error: ErrorSink) -> list[os.DirEntry]:
@@ -29,10 +54,7 @@ def _classify_entry(entry: os.DirEntry, on_error: ErrorSink) -> tuple[str, int] 
         if entry.is_dir(follow_symlinks=False):
             return entry.path
         if entry.is_file(follow_symlinks=False):
-            if "\n" in entry.path:
-                on_error(ScanError(entry.path, "File name contains a newline, not scanned"))
-                return None
-            return entry.path, entry.stat(follow_symlinks=False).st_size
+            return _listable(entry.path, entry.stat(follow_symlinks=False).st_size, on_error)
     except OSError as exc:
         on_error(ScanError(entry.path, exc.strerror or str(exc)))
     return None
@@ -51,7 +73,8 @@ def iter_files(
             return
         current = stack.pop()
         if os.path.isfile(current) and not os.path.islink(current):
-            yield current, os.path.getsize(current)
+            if (item := _listable(current, os.path.getsize(current), on_error)) is not None:
+                yield item
             continue
         subdirs = []
         for entry in _scan_dir(current, on_error):

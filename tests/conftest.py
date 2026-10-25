@@ -17,9 +17,14 @@ FAKE_CLAMSCAN = textwrap.dedent(
     if "--crash" in args:
         print("boom", file=sys.stderr)
         sys.exit(40)
-    file_list = next(a.split("=", 1)[1] for a in args if a.startswith("--file-list="))
+    def opt(name):
+        return next((a.split("=", 1)[1] for a in args if a.startswith(name + "=")), None)
+    sys.stdout.reconfigure(errors="surrogateescape")
+    file_list = opt("--file-list")
     rc = 0
-    for path in open(file_list).read().splitlines():
+    with open(file_list, encoding="utf-8", errors="surrogateescape") as fh:
+        paths = [p for p in fh.read().split("\\n") if p]
+    for path in paths:
         try:
             data = open(path, "rb").read()
         except OSError:
@@ -29,9 +34,11 @@ FAKE_CLAMSCAN = textwrap.dedent(
         if b"VIRUS" in data:
             print(f"{{path}}: Fake.Virus FOUND")
             rc = 1
-        else:
+        elif "--drop-ok" not in args:
             print(f"{{path}}: OK")
-    sys.exit(rc)
+    if opt("--extra-path"):
+        print(f"{{opt('--extra-path')}}: OK")
+    sys.exit(int(opt("--force-rc") or rc))
     """
 )
 

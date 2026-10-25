@@ -2,8 +2,10 @@ import os
 import queue
 import threading
 
+import pytest
+
 from parallel_clamscan.models import Batch, ProducerStats
-from parallel_clamscan.producer import iter_files, make_batches, run_producer
+from parallel_clamscan.producer import iter_files, make_batches, run_producer, unlistable_reason
 
 
 def test_iter_files_walks_tree_and_reports_sizes(sample_tree):
@@ -37,11 +39,48 @@ def test_iter_files_reports_unreadable_dir(tmp_path):
         assert [e.path for e in errors] == [str(locked)]
 
 
-def test_iter_files_rejects_newline_names(tmp_path):
-    (tmp_path / "bad\nname").write_text("x")
+@pytest.mark.parametrize(
+    "name", ["bad\nname", "bad\rname", "p\x0b", "p\x0c", "p\x1c", "p\x1e", "p\x85", "p "]
+)
+def test_iter_files_rejects_names_with_line_breaking_characters(tmp_path, name):
+    (tmp_path / name).write_text("x")
     errors = []
     assert list(iter_files([str(tmp_path)], errors.append)) == []
+    assert [e.path for e in errors] == [str(tmp_path / name)]
+    assert "control character" in errors[0].message
+
+
+def _nested_file(root, length):
+    """Create a file whose absolute path is exactly ``length`` bytes long."""
+    path = str(root)
+    while length - len(path) > 250:
+        path += "/" + "d" * 200
+    path += "/" + "f" * (length - len(path) - 1)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as fh:
+        fh.write("x")
+    assert len(path) == length
+    return path
+
+
+def test_iter_files_rejects_paths_too_long_for_file_list(tmp_path):
+    ok = _nested_file(tmp_path / "ok", 1022)
+    too_long = _nested_file(tmp_path / "long", 1023)
+    errors = []
+    assert [p for p, _ in iter_files([str(tmp_path)], errors.append)] == [ok]
+    assert [e.path for e in errors] == [too_long]
+    assert "longer than 1022 bytes" in errors[0].message
+
+
+def test_iter_files_rejects_unlistable_file_given_directly(tmp_path):
+    (tmp_path / "p\x1c").write_text("x")
+    errors = []
+    assert list(iter_files([str(tmp_path / "p\x1c")], errors.append)) == []
     assert len(errors) == 1
+
+
+def test_unlistable_reason_accepts_ordinary_names():
+    assert unlistable_reason("/data/été: report (1).txt") is None
 
 
 def test_make_batches_by_count():

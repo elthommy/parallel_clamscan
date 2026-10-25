@@ -101,11 +101,28 @@ def progress_line(report: Report, stats: ProducerStats | None) -> str:
     )
 
 
+def _printable(text: str) -> str:
+    """Escape non-printable characters so file names cannot break the summary.
+
+    Undecodable bytes (lone surrogates from ``surrogateescape``) are shown as
+    ``\\xNN``, other non-printable characters with their ``repr`` escape.
+    """
+    out = []
+    for ch in text:
+        if ch.isprintable():
+            out.append(ch)
+        elif 0xDC80 <= ord(ch) <= 0xDCFF:
+            out.append(f"\\x{ord(ch) - 0xDC00:02x}")
+        else:
+            out.append(repr(ch)[1:-1])
+    return "".join(out)
+
+
 def format_summary(report: Report) -> str:
     """Return the human-readable end-of-scan summary."""
     lines = [
         "----------- SCAN SUMMARY -----------",
-        f"Folders: {', '.join(report.folders)}",
+        f"Folders: {', '.join(_printable(f) for f in report.folders)}",
         f"Workers: {report.workers}",
         f"Scanned files: {report.files_scanned}",
         f"Data scanned: {_human_bytes(report.bytes_scanned)}",
@@ -117,10 +134,13 @@ def format_summary(report: Report) -> str:
         lines.append("Scan INTERRUPTED: results are partial.")
     if report.infected:
         lines.append("\nInfected files:")
-        lines += [f"  {d.path}: {d.signature}" for d in report.infected]
+        lines += [f"  {_printable(d.path)}: {_printable(d.signature)}" for d in report.infected]
     if report.errors:
         lines.append("\nErrors:")
-        lines += [f"  {e.path}: {e.message}" for e in report.errors[:_MAX_LISTED_ERRORS]]
+        lines += [
+            f"  {_printable(e.path)}: {_printable(e.message)}"
+            for e in report.errors[:_MAX_LISTED_ERRORS]
+        ]
         hidden = len(report.errors) - _MAX_LISTED_ERRORS
         if hidden > 0:
             lines.append(f"  ... and {hidden} more (use --json-report for the full list)")
