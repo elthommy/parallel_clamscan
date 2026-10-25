@@ -20,16 +20,38 @@ class ParsedOutput:
     clean: list[str] = field(default_factory=list)
     detections: list[Detection] = field(default_factory=list)
     errors: list[ScanError] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
 
     @property
     def scanned(self) -> int:
         """Number of files actually scanned (clean or infected)."""
         return len(self.clean) + len(self.detections)
 
+    def reported_paths(self) -> set[str]:
+        """Return every path clamscan printed a result for, whatever the result."""
+        return {
+            *self.clean,
+            *self.skipped,
+            *(d.path for d in self.detections),
+            *(e.path for e in self.errors),
+        }
+
 
 def build_command(clamscan: str, file_list: str, extra_args: list[str]) -> list[str]:
-    """Return the clamscan argv scanning every path listed in ``file_list``."""
-    return [clamscan, "--no-summary", "--stdout", f"--file-list={file_list}", *extra_args]
+    """Return the clamscan argv scanning every path listed in ``file_list``.
+
+    Symlinks are never followed, even if a listed file was swapped for one after
+    the walk. ``extra_args`` come last so the operator can still override this.
+    """
+    return [
+        clamscan,
+        "--no-summary",
+        "--stdout",
+        "--follow-file-symlinks=0",
+        "--follow-dir-symlinks=0",
+        f"--file-list={file_list}",
+        *extra_args,
+    ]
 
 
 def _split_line(line: str) -> tuple[str, str] | None:
@@ -47,7 +69,7 @@ def _classify(parsed: ParsedOutput, path: str, status: str, seen_errors: set[str
     elif status.endswith(" FOUND"):
         parsed.detections.append(Detection(path, status.removesuffix(" FOUND")))
     elif status in _SKIPPED_STATUSES:
-        return
+        parsed.skipped.append(path)
     elif path not in seen_errors:
         seen_errors.add(path)
         parsed.errors.append(ScanError(path, status.removesuffix(" ERROR")))
@@ -59,10 +81,12 @@ def parse_output(output: str) -> ParsedOutput:
     Lines look like ``/p: OK``, ``/p: Eicar-Test-Signature FOUND``,
     ``/p: Access denied`` or ``WARNING: /p: Can't access file``. A path that
     fails is often reported twice (status line + WARNING); it is kept once.
+    Only ``\\n`` ends a line: ``splitlines()`` would also split on characters
+    such as ``\\x1c`` that may appear inside a file name.
     """
     parsed = ParsedOutput()
     seen_errors: set[str] = set()
-    for raw in output.splitlines():
+    for raw in output.split("\n"):
         line = raw.removeprefix(_WARNING_PREFIX)
         split = _split_line(line)
         if split is None:

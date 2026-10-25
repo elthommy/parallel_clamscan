@@ -18,6 +18,8 @@ def test_build_command():
         "clamscan",
         "--no-summary",
         "--stdout",
+        "--follow-file-symlinks=0",
+        "--follow-dir-symlinks=0",
         "--file-list=/tmp/l",
         "--max-filesize=1M",
     ]
@@ -31,7 +33,22 @@ def test_parse_real_output():
         ScanError("/t/noperm", "Access denied"),
         ScanError("/t/missing", "No such file or directory"),
     ]
+    assert parsed.skipped == ["/t/link"]
     assert parsed.scanned == 3
+    assert parsed.reported_paths() == {
+        "/t/clean.txt",
+        "/t/empty.txt",
+        "/t/ei:car.com",
+        "/t/link",
+        "/t/noperm",
+        "/t/missing",
+    }
+
+
+def test_parse_splits_lines_on_newline_only():
+    parsed = parse_output("/x/p\x1cq\x85r s: Sig.X FOUND\n/x/a\rb: OK\n")
+    assert parsed.detections == [Detection("/x/p\x1cq\x85r s", "Sig.X")]
+    assert parsed.clean == ["/x/a\rb"]
 
 
 def test_parse_path_with_colon_space():

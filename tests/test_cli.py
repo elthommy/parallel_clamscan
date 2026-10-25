@@ -1,8 +1,9 @@
 import json
+import os
 
 import pytest
 
-from parallel_clamscan.cli import main, parse_args
+from parallel_clamscan.cli import main, parse_args, result_hiding_options
 
 
 def test_parse_args_splits_extra_clamscan_args(fake_clamscan, tmp_path):
@@ -11,6 +12,32 @@ def test_parse_args_splits_extra_clamscan_args(fake_clamscan, tmp_path):
     )
     assert args.workers == 3
     assert extra == ["--max-filesize=1M"]
+
+
+@pytest.mark.parametrize(
+    "option",
+    ["-i", "--infected", "--infected=yes", "-o", "--suppress-ok-results", "--quiet", "-ri"],
+)
+def test_parse_args_rejects_result_hiding_options(fake_clamscan, tmp_path, capsys, option):
+    with pytest.raises(SystemExit):
+        parse_args([str(tmp_path), "--clamscan", fake_clamscan, "--", option])
+    assert "not supported" in capsys.readouterr().err
+
+
+def test_result_hiding_options_ignores_other_args():
+    assert result_hiding_options(["-d", "/db/io", "--include=x.io", "--max-filesize=1M"]) == []
+
+
+def test_main_escapes_unprintable_names_and_still_writes_json(fake_clamscan, tmp_path, capsys):
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    with open(os.path.join(os.fsencode(tree), b"x\xff"), "w") as fh:
+        fh.write("VIRUS")
+    report_path = tmp_path / "report.json"
+    argv = [str(tree), "--clamscan", fake_clamscan, "--json-report", str(report_path)]
+    assert main(argv) == 1
+    assert f"{tree}/x\\xff: Fake.Virus" in capsys.readouterr().out
+    assert json.loads(report_path.read_text())["infected"][0]["signature"] == "Fake.Virus"
 
 
 def test_parse_args_rejects_missing_folder(fake_clamscan, tmp_path):

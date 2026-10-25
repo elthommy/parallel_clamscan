@@ -64,6 +64,17 @@ def test_format_summary_truncates_errors():
     assert "and 5 more" in summary
 
 
+def test_format_summary_escapes_unprintable_characters():
+    report = Report(folders=["/data"], workers=1)
+    report.infected.append(Detection("/data/a\x1b[2Jb\udcff", "Sig"))
+    report.add_error(ScanError("/data/c d", "denied\nagain"))
+    report.finish()
+    summary = format_summary(report)
+    assert "/data/a\\x1b[2Jb\\xff: Sig" in summary
+    assert "/data/c\\u2028d: denied\\nagain" in summary
+    summary.encode("ascii")
+
+
 def test_write_json(tmp_path):
     report = Report(folders=["/data"], workers=2)
     report.add(_result(0, 1, detections=[Detection("/data/\udcff", "Sig")]))

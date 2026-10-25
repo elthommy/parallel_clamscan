@@ -85,6 +85,10 @@ uv run pclamscan /data --clamscan /opt/clamav/bin/clamscan
 > already handles walking the folders and building the file lists. Folder-level
 > filters such as `--exclude-dir` also have no effect, because `clamscan` only
 > receives individual files. See [Limitations](#limitations--differences-from-clamscan).
+>
+> Options that hide per-file results (`-i`/`--infected`, `-o`/`--suppress-ok-results`,
+> `--quiet`) are rejected. `pclamscan` needs one result line per file to notice files
+> that were silently not scanned, and its summary already lists only infected files.
 
 ## Command-line options
 
@@ -211,12 +215,18 @@ Paths that are not valid UTF-8 are kept losslessly as `\udcXX` escapes.
 
 2. **Workers** (`worker.py`, N threads)
    - Each worker takes a batch and writes its paths to a temporary file list,
-     using the raw bytes so any filename works. It then runs:
-     `clamscan --no-summary --stdout --file-list=<tmp> [extra args]`.
+     using the raw bytes. It then runs:
+     `clamscan --no-summary --stdout --follow-file-symlinks=0 --follow-dir-symlinks=0 --file-list=<tmp> [extra args]`.
+     The symlink options mean a file swapped for a symlink after the walk is
+     skipped, not followed.
    - Each `clamscan` runs in its own session, so a terminal Ctrl-C reaches only
      `pclamscan`, which then stops the children itself.
    - The output is parsed (`clamscan.py`) into a `BatchResult`: clean files,
      detections, errors, duration and exit code. The result goes on the result queue.
+   - Every file of the batch must get exactly one result. A listed file with no
+     result line, a result for a path that was not listed, or exit code 1 with no
+     detection parsed is recorded as an error, so no file can silently drop out of
+     the report.
    - When a worker receives a sentinel, it forwards a `None` to the result queue and exits.
    - Workers are threads and not processes because each one spends its time waiting
      on its `clamscan` child. The scanning happens in those child processes, so
@@ -242,7 +252,8 @@ against ClamAV 1.5.4:
 | `WARNING: /p: Can't access file` (stderr) | error (kept once per path) |
 
 Lines are split on the **last** `": "`, so paths that contain colons, even `": "`,
-are handled correctly. Other stderr noise, such as `LibClamAV Warning: …`, is ignored.
+are handled correctly. Only `\n` ends a line, so other line-breaking characters
+cannot split a result. Other stderr noise, such as `LibClamAV Warning: …`, is ignored.
 
 ## Error handling
 
@@ -253,7 +264,9 @@ are handled correctly. Other stderr noise, such as `LibClamAV Warning: …`, is 
 | `clamscan` exits with an unexpected code (not 0, 1 or 2), or exits with 2 without saying which file failed | One error is recorded for the whole batch, including the end of its stderr. |
 | `clamscan` cannot be started | One error for the whole batch, with `returncode: -1`. |
 | Unexpected Python exception in the producer or a worker | Recorded as an error (`<producer>` or `<batch N>`). The other threads keep going, and the queues always receive their sentinels, so the program never hangs. |
-| Filename containing a newline | Not scanned, because it cannot go in a `--file-list`. Reported as an error. |
+| Filename containing a control character (newline, `\r`, `\x1c`, …) or a Unicode line separator | Not scanned, because it would break the one-path-per-line `--file-list` and the one-result-per-line output. Reported as an error. |
+| Path longer than 1022 bytes | Not scanned, because `clamscan` reads `--file-list` lines into a 1024-byte buffer and would split the path. Reported as an error. |
+| A listed file gets no result line, or `clamscan` reports a path that was not listed | Recorded as an error for that path. |
 
 ## Interrupting a scan (Ctrl-C)
 

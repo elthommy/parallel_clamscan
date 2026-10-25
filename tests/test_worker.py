@@ -32,6 +32,29 @@ def test_scan_batch_unexpected_exit_code_is_batch_error(fake_clamscan, sample_tr
     assert len(result.errors) == 1 and "boom" in result.errors[0].message
 
 
+def test_scan_batch_reports_listed_file_without_result(fake_clamscan, sample_tree):
+    batch = _batch(sample_tree / "f1", sample_tree / "c" / "bad:file")
+    result = scan_batch(batch, fake_clamscan, ["--drop-ok"], threading.Event())
+    assert [d.path for d in result.detections] == [str(sample_tree / "c" / "bad:file")]
+    assert [e.path for e in result.errors] == [str(sample_tree / "f1")]
+    assert "No result from clamscan" in result.errors[0].message
+
+
+def test_scan_batch_reports_result_for_unlisted_path(fake_clamscan, sample_tree):
+    extra = ["--extra-path=/etc/elsewhere"]
+    result = scan_batch(_batch(sample_tree / "f1"), fake_clamscan, extra, threading.Event())
+    assert result.errors == [
+        ScanError("/etc/elsewhere", "clamscan reported a path that is not in the batch")
+    ]
+
+
+def test_scan_batch_infected_exit_without_detection_is_batch_error(fake_clamscan, sample_tree):
+    extra = ["--force-rc=1"]
+    result = scan_batch(_batch(sample_tree / "f1"), fake_clamscan, extra, threading.Event())
+    assert result.detections == []
+    assert len(result.errors) == 1 and "no infected file was parsed" in result.errors[0].message
+
+
 def test_scan_batch_missing_executable(sample_tree):
     result = scan_batch(_batch(sample_tree / "f1"), "/nonexistent/clamscan", [], threading.Event())
     assert result.returncode == -1

@@ -9,7 +9,7 @@ import tempfile
 import threading
 import time
 
-from parallel_clamscan.clamscan import build_command, parse_output
+from parallel_clamscan.clamscan import ParsedOutput, build_command, parse_output
 from parallel_clamscan.models import Batch, BatchResult, ScanError
 
 _POLL_S = 0.5
@@ -56,6 +56,37 @@ def _batch_error(batch: Batch, message: str) -> ScanError:
     return ScanError(f"<batch {batch.id}: {len(batch.paths)} files>", message)
 
 
+def _status_error(
+    batch: Batch, returncode: int, err: str, parsed: ParsedOutput
+) -> ScanError | None:
+    """Return a batch error if clamscan's exit code contradicts its output, else None."""
+    if returncode not in (0, 1, 2) or (returncode == 2 and not parsed.errors):
+        return _batch_error(batch, f"clamscan exit {returncode}: {err[-_STDERR_TAIL:]}")
+    if returncode == 1 and not parsed.detections:
+        return _batch_error(batch, "clamscan exit 1 (infected) but no infected file was parsed")
+    return None
+
+
+def _reconcile(batch: Batch, parsed: ParsedOutput) -> list[ScanError]:
+    """Return errors for listed paths without a result and for results of unlisted paths.
+
+    Every file of the batch must end up visible (clean, infected, skipped or
+    error): a file silently missing from clamscan's output may not have been scanned.
+    """
+    listed = set(batch.paths)
+    reported = parsed.reported_paths()
+    errors = [
+        ScanError(p, "No result from clamscan, file may not have been scanned")
+        for p in batch.paths
+        if p not in reported
+    ]
+    errors += [
+        ScanError(p, "clamscan reported a path that is not in the batch")
+        for p in sorted(reported - listed)
+    ]
+    return errors
+
+
 def scan_batch(
     batch: Batch, clamscan: str, extra_args: list[str], stop: threading.Event
 ) -> BatchResult | None:
@@ -74,8 +105,11 @@ def scan_batch(
     warnings = [line for line in err.splitlines() if line.startswith("WARNING: ")]
     parsed = parse_output("\n".join([out, *warnings]))
     errors = list(parsed.errors)
-    if returncode not in (0, 1, 2) or (returncode == 2 and not errors):
-        errors.append(_batch_error(batch, f"clamscan exit {returncode}: {err[-_STDERR_TAIL:]}"))
+    status_error = _status_error(batch, returncode, err, parsed)
+    if status_error is not None:
+        errors.append(status_error)
+    else:
+        errors += _reconcile(batch, parsed)
     return BatchResult(
         batch_id=batch.id,
         files=len(batch.paths),
